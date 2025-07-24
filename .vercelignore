@@ -1,0 +1,23 @@
+# バックエンドディレクトリを除外（Vercel Functionsとして別途デプロイ）
+backend/
+
+# 開発用ファイルを除外
+node_modules/
+*.log
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ドキュメントディレクトリを除外
+Docs/
+
+# スクリプトディレクトリを除外
+scripts/
+
+# GitHub Actionsを除外
+.github/
+
+# その他の開発用ファイル
+*.md
+!README.md 

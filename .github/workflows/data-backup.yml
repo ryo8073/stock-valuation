@@ -1,0 +1,246 @@
+name: 国税庁データ自動更新・バックアップ
+
+on:
+  schedule:
+    # 毎週月曜日午前3時（JST）に実行
+    - cron: '0 18 * * 1'
+  workflow_dispatch:
+    # 手動実行も可能
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # 国税庁データの自動取得・更新
+  update-nta-data:
+    name: 国税庁データ自動更新
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: リポジトリのチェックアウト
+        uses: actions/checkout@v4
+        
+      - name: Node.jsのセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: Pythonのセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: 依存関係のインストール
+        run: |
+          npm ci
+          cd backend && pip install -r requirements.txt && cd ..
+          
+      - name: 環境変数の設定
+        run: |
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env.local
+          echo "SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}" >> .env.local
+          echo "EMAIL_SMTP_URL=${{ secrets.EMAIL_SMTP_URL }}" >> .env.local
+          echo "WEBHOOK_URL=${{ secrets.WEBHOOK_URL }}" >> .env.local
+          echo "ADMIN_PASSWORD_HASH=${{ secrets.ADMIN_PASSWORD_HASH }}" >> .env.local
+          
+      - name: データベース接続テスト
+        run: |
+          node -e "
+            const { Pool } = require('pg');
+            const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+            pool.query('SELECT 1').then(() => {
+              console.log('✅ データベース接続成功');
+              process.exit(0);
+            }).catch(err => {
+              console.error('❌ データベース接続失敗:', err);
+              process.exit(1);
+            });
+          "
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          
+      - name: 国税庁データ更新の実行
+        run: |
+          node api/cron/update-tax-data.js
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          EMAIL_SMTP_URL: ${{ secrets.EMAIL_SMTP_URL }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          
+      - name: 更新結果の確認
+        run: |
+          node -e "
+            const { Pool } = require('pg');
+            const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+            
+            Promise.all([
+              pool.query('SELECT COUNT(*) as count FROM comparable_industry_data'),
+              pool.query('SELECT COUNT(*) as count FROM dividend_reduction_rates'),
+              pool.query('SELECT COUNT(*) as count FROM company_size_criteria'),
+              pool.query('SELECT * FROM update_history ORDER BY check_date DESC LIMIT 1')
+            ]).then(results => {
+              console.log('📊 データベース統計:');
+              console.log(`  類似業種データ: ${results[0].rows[0].count}件`);
+              console.log(`  配当還元率データ: ${results[1].rows[0].count}件`);
+              console.log(`  会社規模判定基準: ${results[2].rows[0].count}件`);
+              
+              if (results[3].rows.length > 0) {
+                const latest = results[3].rows[0];
+                console.log(`  最新更新: ${latest.check_date} (${latest.update_status})`);
+              }
+              
+              process.exit(0);
+            }).catch(err => {
+              console.error('❌ 統計取得失敗:', err);
+              process.exit(1);
+            });
+          "
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+  # データベースバックアップ
+  backup-database:
+    name: データベースバックアップ
+    runs-on: ubuntu-latest
+    needs: update-nta-data
+    
+    steps:
+      - name: リポジトリのチェックアウト
+        uses: actions/checkout@v4
+        
+      - name: Pythonのセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: 依存関係のインストール
+        run: |
+          cd backend && pip install -r requirements.txt && cd ..
+          
+      - name: データベースバックアップの実行
+        run: |
+          cd backend
+          python scripts/backup_tax_data.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_PATH: ./backups
+          
+      - name: バックアップファイルのアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-backup-${{ github.run_number }}
+          path: backend/backups/
+          retention-days: 30
+          
+      - name: バックアップ結果の通知
+        run: |
+          if [ -f "backend/backups/backup_success.txt" ]; then
+            echo "✅ バックアップ成功"
+            # Slack通知（オプション）
+            if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+              curl -X POST -H 'Content-type: application/json' \
+                --data "{\"text\":\"✅ データベースバックアップ完了: ${{ github.run_number }}\"}" \
+                ${{ secrets.SLACK_WEBHOOK_URL }}
+            fi
+          else
+            echo "❌ バックアップ失敗"
+            exit 1
+          fi
+
+  # システム健全性チェック
+  health-check:
+    name: システム健全性チェック
+    runs-on: ubuntu-latest
+    needs: [update-nta-data, backup-database]
+    
+    steps:
+      - name: リポジトリのチェックアウト
+        uses: actions/checkout@v4
+        
+      - name: Node.jsのセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: 依存関係のインストール
+        run: npm ci
+        
+      - name: アプリケーション健全性チェック
+        run: |
+          # Vercelアプリケーションの健全性チェック
+          if [ -n "${{ secrets.VERCEL_HEALTH_CHECK_URL }}" ]; then
+            response=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.VERCEL_HEALTH_CHECK_URL }})
+            if [ "$response" = "200" ]; then
+              echo "✅ アプリケーション健全性チェック成功"
+            else
+              echo "❌ アプリケーション健全性チェック失敗: HTTP $response"
+              exit 1
+            fi
+          else
+            echo "⚠️ VERCEL_HEALTH_CHECK_URLが設定されていません"
+          fi
+          
+      - name: データベース健全性チェック
+        run: |
+          node -e "
+            const { Pool } = require('pg');
+            const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+            
+            Promise.all([
+              pool.query('SELECT COUNT(*) as count FROM comparable_industry_data'),
+              pool.query('SELECT COUNT(*) as count FROM dividend_reduction_rates'),
+              pool.query('SELECT COUNT(*) as count FROM company_size_criteria'),
+              pool.query('SELECT COUNT(*) as count FROM update_history'),
+              pool.query('SELECT COUNT(*) as count FROM system_settings')
+            ]).then(results => {
+              const counts = results.map(r => r.rows[0].count);
+              console.log('📊 データベース健全性チェック:');
+              console.log(`  類似業種データ: ${counts[0]}件`);
+              console.log(`  配当還元率データ: ${counts[1]}件`);
+              console.log(`  会社規模判定基準: ${counts[2]}件`);
+              console.log(`  更新履歴: ${counts[3]}件`);
+              console.log(`  システム設定: ${counts[4]}件`);
+              
+              // 最小データ量チェック
+              if (counts[0] < 10 || counts[1] < 5 || counts[2] < 10) {
+                console.error('❌ データ量が不足しています');
+                process.exit(1);
+              }
+              
+              console.log('✅ データベース健全性チェック成功');
+              process.exit(0);
+            }).catch(err => {
+              console.error('❌ データベース健全性チェック失敗:', err);
+              process.exit(1);
+            });
+          "
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          
+      - name: 最終結果の通知
+        run: |
+          echo "🎉 全ジョブ完了"
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            curl -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"🎉 国税庁データ自動更新・バックアップ完了: ${{ github.run_number }}\"}" \
+              ${{ secrets.SLACK_WEBHOOK_URL }}
+          fi
+
+  # エラー時の通知
+  notify-on-failure:
+    name: エラー通知
+    runs-on: ubuntu-latest
+    if: failure()
+    
+    steps:
+      - name: エラー通知の送信
+        run: |
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            curl -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"❌ 国税庁データ自動更新でエラーが発生しました: ${{ github.run_number }}\n詳細: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+              ${{ secrets.SLACK_WEBHOOK_URL }}
+          fi 

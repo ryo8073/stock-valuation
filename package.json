@@ -1,0 +1,22 @@
+{
+  "name": "stock-valuator-pro",
+  "version": "1.0.0",
+  "description": "非上場株式の相続税評価額を自動計算するWebアプリケーション",
+  "scripts": {
+    "setup:postgres": "node scripts/setup-vercel-postgres.js",
+    "setup:postgres:sample": "node scripts/setup-vercel-postgres.js --with-sample-data",
+    "vercel:deploy": "vercel --prod",
+    "vercel:env:pull": "vercel env pull .env.local",
+    "vercel:env:push": "vercel env push .env.local"
+  },
+  "dependencies": {
+    "pg": "^8.11.3",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.10.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+} 
