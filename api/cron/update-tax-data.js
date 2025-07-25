@@ -1,5 +1,5 @@
 // api/cron/update-tax-data.js
-import { fetchNTAData, validateData, updateDatabase, notifyUpdate, notifyError } from '../utils';
+import { fetchNTAData, validateData, updateDatabase } from '../utils';
 
 export default async function handler(req, res) {
   // Cron jobからの実行のみ許可
@@ -27,13 +27,6 @@ export default async function handler(req, res) {
       // 4. データベース更新
       await updateDatabase(latestData);
       
-      // 5. 更新通知
-      await notifyUpdate({
-        timestamp: new Date().toISOString(),
-        changes: hasChanges,
-        recordCount: latestData.length
-      });
-      
       console.log('Tax data update completed successfully');
       res.status(200).json({ 
         status: 'success', 
@@ -50,13 +43,6 @@ export default async function handler(req, res) {
     
   } catch (error) {
     console.error('Tax data update failed:', error);
-    
-    // エラー通知
-    await notifyError({
-      error: error.message,
-      timestamp: new Date().toISOString(),
-      stack: error.stack
-    });
     
     res.status(500).json({ 
       status: 'error', 

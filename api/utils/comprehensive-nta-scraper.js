@@ -1,7 +1,6 @@
 const { parsePDF } = require('./pdf-parser');
 const { validateData } = require('./data-validator');
 const { saveToDatabase } = require('./database');
-const { sendNotification } = require('./notification');
 
 /**
  * 包括的国税庁データ自動取得・解析システム
@@ -319,7 +318,6 @@ class ComprehensiveNTAScraper {
       
       // 5. 結果を通知
       const duration = Date.now() - startTime;
-      await this.sendUpdateNotification(updateResults, duration);
       
       console.log(`✅ 包括的データ更新完了: ${duration}ms`);
       return {
@@ -407,30 +405,6 @@ class ComprehensiveNTAScraper {
     // 改正通達の内容を解析
     // 制度変更の影響を評価
     return await this.extractAmendmentData(pdfBuffer, source);
-  }
-
-  /**
-   * 更新通知を送信
-   */
-  async sendUpdateNotification(updateResults, duration) {
-    const successCount = updateResults.filter(r => r.success).length;
-    const totalCount = updateResults.length;
-    
-    const message = {
-      type: successCount === totalCount ? 'success' : 'warning',
-      title: '包括的国税庁データ更新完了',
-      message: `${successCount}/${totalCount}件のデータ更新が完了しました`,
-      details: {
-        duration: `${duration}ms`,
-        results: updateResults.map(r => ({
-          type: r.source.type,
-          success: r.success,
-          reason: r.error || '成功'
-        }))
-      }
-    };
-    
-    await sendNotification(message);
   }
 }
 

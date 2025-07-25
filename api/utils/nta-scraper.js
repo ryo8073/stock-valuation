@@ -4,7 +4,6 @@ import { parse } from 'node-html-parser';
 const { parsePDF } = require('./pdf-parser');
 const { validateData } = require('./data-validator');
 const { saveToDatabase } = require('./database');
-const { sendNotification } = require('./notification');
 
 /**
  * 国税庁データ自動取得・解析システム
@@ -339,16 +338,6 @@ class NTADataScraper {
       
       // 7. 通知を送信
       const duration = Date.now() - startTime;
-      await sendNotification({
-        type: 'success',
-        title: '国税庁データ更新完了',
-        message: `${dataInfo.year}年${dataInfo.month}月のデータを更新しました`,
-        details: {
-          duration: `${duration}ms`,
-          records: results,
-          validation: validationResults
-        }
-      });
       
       console.log(`✅ 国税庁データ更新完了: ${duration}ms`);
       return {
@@ -361,17 +350,6 @@ class NTADataScraper {
       
     } catch (error) {
       console.error('❌ 国税庁データ更新に失敗:', error);
-      
-      // エラー通知を送信
-      await sendNotification({
-        type: 'error',
-        title: '国税庁データ更新失敗',
-        message: error.message,
-        details: {
-          timestamp: new Date().toISOString(),
-          error: error.stack
-        }
-      });
       
       throw error;
     }

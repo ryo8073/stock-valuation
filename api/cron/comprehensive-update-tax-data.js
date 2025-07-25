@@ -1,4 +1,4 @@
-const { ComprehensiveNTAScraper } = require('../utils/comprehensive-nta-scraper');
+import { fetchComprehensiveNTAData, validateData, updateDatabase } from '../utils';
 
 /**
  * 包括的国税庁データ自動更新Cronジョブ

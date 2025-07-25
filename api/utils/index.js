@@ -1,5 +1,9 @@
 // api/utils/index.js
-export { fetchNTAData } from './nta-scraper.js';
-export { validateData } from './data-validator.js';
-export { updateDatabase } from './database.js';
-export { notifyUpdate, notifyError } from './notification.js'; 
+export { fetchNTAData, parseNTAData, validateData } from './nta-scraper.js';
+export { 
+  updateDatabase, 
+  getCurrentData, 
+  compareData, 
+  getUpdateHistory,
+  recordUpdateAttempt 
+} from './database.js';
