@@ -30,9 +30,6 @@
   ],
   "env": {
     "DATABASE_URL": "@database_url",
-    "SLACK_WEBHOOK_URL": "@slack_webhook_url",
-    "EMAIL_SMTP_URL": "@email_smtp_url",
-    "WEBHOOK_URL": "@webhook_url",
     "ADMIN_PASSWORD_HASH": "@admin_password_hash"
   }
 } 
